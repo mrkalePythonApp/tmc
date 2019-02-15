@@ -29,17 +29,23 @@ Packet:
 [<ptype>, <pdata>]
 
 <ptype>:
- - 'START' (START condition)
- - 'COMMAND' (Command)
- - 'DATA' (Data)
- - 'STOP' (STOP condition)
- - 'ACK' (ACK bit)
- - 'NACK' (NACK bit)
- - 'BITS' (<pdata>: list of data bits and their ss/es numbers)
+ - "START" (START condition)
+ - "COMMAND" (Command)
+ - "DATA" (Data)
+ - "STOP" (STOP condition)
+ - "ACK" (ACK bit)
+ - "NACK" (NACK bit)
+ - "BITS" (<pdata>: list of data bits and their ss/es numbers)
 
-<pdata> is the data byte associated with the 'DATA*' command.
-For 'START', 'STOP', 'ACK', and 'NACK' <pdata> is None.
+<pdata> is the data byte associated with the "DATA*" command.
+For "START", "STOP", "ACK", and "NACK" <pdata> is None.
 """
+###############################################################################
+# Channels
+###############################################################################
+CLK = 0     # Serial clock
+DIO = 1     # Data input/output
+STB = 2     # Strobe line
 
 
 ###############################################################################
@@ -57,7 +63,7 @@ class Chip:
 class AnnProtocol:
     """Enumeration of annotations for protocol states."""
 
-    (START, STOP, ACK, NACK, COMMAND, DATA, BIT) = range(0, 7)
+    (START, STOP, ACK, NACK, COMMAND, DATA, BIT) = range(7)
 
 
 class AnnInfo:
@@ -82,7 +88,7 @@ commands = {
     AnnProtocol.NACK: "NACK",
     AnnProtocol.COMMAND: "COMMAND",
     AnnProtocol.DATA: "DATA",
-    AnnProtocol.BIT: "BIT",
+    AnnProtocol.BIT: "BITS",
 }
 
 chips = {
@@ -120,34 +126,51 @@ binary = {
 ###############################################################################
 # Decoder
 ###############################################################################
+class SamplerateError(Exception):
+    """Custom exception."""
+
+    pass
+
+
+class ChannelError(Exception):
+    """Custom exception."""
+
+    pass
+
+
 class Decoder(srd.Decoder):
     """Protocol decoder for Titan Micro Circuits."""
 
     api_version = 3
-    id = 'tmc'
-    name = 'TMC'
-    longname = 'Titan Micro Circuit'
-    desc = 'Bus for TM1636/37/38 7-segment LED drivers.'
-    license = 'gplv2+'
-    inputs = ['logic']
-    outputs = ['tmc']
+    id = "tmc"
+    name = "TMC"
+    longname = "Titan Micro Circuit"
+    desc = "Bus for TM1636/37/38 7-segment LED drivers."
+    license = "gplv2+"
+    inputs = ["logic"]
+    outputs = ["tmc"]
     channels = (
-        {'id': 'clk', 'name': 'CLK', 'desc': 'Clock line'},
-        {'id': 'dio', 'name': 'DIO', 'desc': 'Data line'},
+        {"id": "clk", "name": "CLK", "desc": "Clock line"},
+        {"id": "dio", "name": "DIO", "desc": "Data line"},
     )
     optional_channels = (
-        {'id': 'stb', 'name': 'STB', 'desc': 'Strobe line'},
+        {"id": "stb", "name": "STB", "desc": "Strobe line"},
     )
     options = (
         {"id": "radix", "desc": "Number format", "default": "Hex",
          "values": ("Hex", "Dec", "Oct", "Bin")},
     )
-    annotations = hlp.create_annots({"prot": protocol, "info": info})
+    annotations = hlp.create_annots(
+        {
+            "prot": protocol,
+            "info": info,
+         }
+    )
     annotation_rows = (
         ("bits", "Bits", (AnnProtocol.BIT,)),
-        ("data", "Cmd/Data", tuple(
-            range(AnnProtocol.START, AnnProtocol.DATA + 1)
-            )),
+        ("data", "Cmd/Data", tuple(range(
+            AnnProtocol.START, AnnProtocol.DATA + 1
+            ))),
         ("warnings", "Warnings", (AnnInfo.WARN,)),
     )
     binary = hlp.create_annots({"data": binary})
@@ -165,7 +188,7 @@ class Decoder(srd.Decoder):
         self.chiptype = None
         self.bytecount = 0
         self.clear_data()
-        self.state = 'FIND START'
+        self.state = "FIND START"
 
     def metadata(self, key, value):
         """Pass metadata about the data stream."""
@@ -179,7 +202,7 @@ class Decoder(srd.Decoder):
         self.out_binary = self.register(srd.OUTPUT_BINARY)
         self.out_bitrate = self.register(
             srd.OUTPUT_META,
-            meta=(int, 'Bitrate', 'Bitrate from Start bit to Stop bit')
+            meta=(int, "Bitrate", "Bitrate from Start bit to Stop bit")
         )
 
     def putx(self, data):
@@ -218,7 +241,7 @@ class Decoder(srd.Decoder):
         self.putp([commands[cmd], None])
         self.putx([cmd, protocol[cmd]])
         self.clear_data()
-        self.state = 'FIND DATA'
+        self.state = "FIND DATA"
 
     def handle_data(self, pins):
         """Create name and call corresponding data handler."""
@@ -245,14 +268,15 @@ class Decoder(srd.Decoder):
 
         Notes
         -----
-        - The method is call at rising edge of each clock pulse regardless of
+        - The method is called at rising edge of each clock pulse regardless of
           its purpose or meaning.
-        - For acknowledge clock pulse and start/stop pulse the registration or
-          this bit provided in vain just for simplicity of the method.
-        - Store individual bits and their start/end sample numbers.
+        - For acknowledge clock pulse and start/stop pulse the registration of
+          this bit is provided in vain just for simplicity of the method.
+        - The method stores individual bits and their start/end sample numbers.
         - In the bit list, index 0 represents the recently processed bit, which
           is finally the MSB (LSB-first transmission).
-        - Display previous bit because its end sample number in now known.
+        - The method displays previous bit because its end sample number is
+          known just at processing the current bit.
 
         """
         clk, dio, stb = pins
@@ -277,6 +301,8 @@ class Decoder(srd.Decoder):
         cmd = AnnProtocol.DATA
         if self.bytecount == 0:
             cmd = AnnProtocol.COMMAND
+        self.bits.pop(0)    # Remove ACK bit
+        self.bits.reverse()
         self.putp([commands[AnnProtocol.BIT], self.bits])
         self.putp([commands[cmd], self.databyte])
         self.putb([AnnBinary.DATA, bytes([self.databyte])])
@@ -288,7 +314,7 @@ class Decoder(srd.Decoder):
         self.clear_data()
         self.ss_ack = self.samplenum  # Remember start of ACK bit
         self.bytecount += 1
-        self.state = 'FIND ACK'
+        self.state = "FIND ACK"
 
     def handle_ack(self, pins):
         """Process ACK/NACK bit."""
@@ -297,7 +323,7 @@ class Decoder(srd.Decoder):
         cmd = AnnProtocol.NACK if (dio == 1) else AnnProtocol.ACK
         self.putp([commands[cmd], None])
         self.putx([cmd, protocol[cmd]])
-        self.state = 'FIND DATA'
+        self.state = "FIND DATA"
 
     def handle_stop_tm1637(self):
         """Process stop condition for TM1636/37."""
@@ -308,7 +334,7 @@ class Decoder(srd.Decoder):
         self.putp([commands[cmd], None])
         self.putx([cmd, protocol[cmd]])
         self.clear_data()
-        self.state = 'FIND START'
+        self.state = "FIND START"
 
     def handle_byte_tm1638(self):
         """Process data byte after last CLK pulse."""
@@ -322,6 +348,7 @@ class Decoder(srd.Decoder):
         cmd = AnnProtocol.DATA
         if self.bytecount == 0:
             cmd = AnnProtocol.COMMAND
+        self.bits.reverse()
         self.putp([commands[AnnProtocol.BIT], self.bits])
         self.putp([commands[cmd], self.databyte])
         self.putb([AnnBinary.DATA, bytes([self.databyte])])
@@ -357,23 +384,28 @@ class Decoder(srd.Decoder):
         self.putp([commands[cmd], None])
         self.putx([cmd, protocol[cmd]])
         self.clear_data()
-        self.state = 'FIND START'
+        self.state = "FIND START"
 
     def decode(self):
         """Decode samples provided by logic analyzer."""
+        if not self.samplerate:
+            raise SamplerateError("Cannot decode without samplerate.")
+        has_pin = [self.has_channel(ch) for ch in (CLK, DIO)]
+        if has_pin != [True, True]:
+            raise ChannelError("Both CLK and DIO pins required.")
         while True:
             # State machine
             if self.state == "FIND START":
                 # Wait for any of the START conditions:
                 # TM1636/37: CLK = high, DIO = falling
-                # TM1638: STB = falling
-                pins = self.wait([{0: 'h', 1: 'f'},
-                                  {2: 'f'},
+                # TM1638: CLK = high, STB = falling
+                pins = self.wait([{CLK: "h", DIO: "f"},
+                                  {CLK: 'h', STB: "f"},
                                   ])
                 if self.matched[0]:
                     self.chiptype = Chip.TM1637
                     self.handle_start(pins)
-                if self.matched[1]:
+                elif self.matched[1]:
                     self.chiptype = Chip.TM1638
                     self.handle_start(pins)
             elif self.state == "FIND DATA":
@@ -381,27 +413,23 @@ class Decoder(srd.Decoder):
                 #  Clock pulse: CLK = rising
                 #  TM1636/37 STOP condition: CLK = high, DIO = rising
                 #  TM1638 STOP condition: STB = rising
-                pins = self.wait([{0: 'r'},
-                                  {0: 'h', 1: 'r'},
-                                  {2: 'r'},
+                pins = self.wait([{CLK: "r"},
+                                  {CLK: "h", DIO: "r"},
+                                  {STB: "r"},
                                   ])
                 if self.matched[0]:
                     self.handle_data(pins)
-                elif self.matched[1]:
-                    self.handle_stop()
-                elif self.matched[2]:
+                elif self.matched[1] or self.matched[2]:
                     self.handle_stop()
             elif self.state == "FIND ACK":
-                # Wait for and of ACK bit: CLK = falling
-                self.handle_ack(self.wait({0: 'f'}))
+                # Wait for an ACK bit
+                self.handle_ack(self.wait({CLK: "f"}))
             elif self.state == "FIND STOP":
                 # Wait for STOP conditions:
                 #  TM1636/37 STOP condition: CLK = high, DIO = rising
                 #  TM1638 STOP condition: STB = rising
-                pins = self.wait([{0: 'h', 1: 'r'},
-                                  {2: 'r'},
+                pins = self.wait([{CLK: "h", DIO: "r"},
+                                  {STB: "r"},
                                   ])
-                if self.matched[0]:
-                    self.handle_stop()
-                elif self.matched[1]:
+                if self.matched[0] or self.matched[1]:
                     self.handle_stop()
