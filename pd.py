@@ -391,12 +391,13 @@ class Decoder(srd.Decoder):
                 # WIRE2: CLK = high, DIO = falling
                 pins = self.wait([
                     {CLK: 'h', STB: "f"},
+                    {CLK: 'l', STB: "f"},
                     {CLK: "h", DIO: "f"},
                 ])
-                if self.matched[0]:
+                if self.matched[0] or self.matched[1]:
                     self.bustype = "wire3"
                     self.handle_start(pins)
-                elif self.matched[1]:
+                elif self.matched[2]:
                         self.bustype = "wire2"
                         self.handle_start(pins)
             elif self.state == "FIND DATA":
