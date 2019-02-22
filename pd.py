@@ -220,9 +220,9 @@ class Decoder(srd.Decoder):
 
     def handle_bitrate(self):
         """Calculate bitrate."""
-        if self.samplerate:
-            elapsed = 1 / float(self.samplerate)    # Sample time period
-            elapsed *= self.samplenum - self.pdu_start - 1
+        elapsed = 1 / float(self.samplerate)    # Sample time period
+        elapsed *= self.samplenum - self.pdu_start - 1
+        if elapsed:
             bitrate = int(1 / elapsed * self.pdu_bits)
             self.put(self.ss_byte, self.samplenum, self.out_bitrate, bitrate)
 
@@ -291,7 +291,7 @@ class Decoder(srd.Decoder):
         # Display data byte
         self.ss, self.es = self.ss_byte, self.samplenum
         cmd = (AnnProtocol.DATA, AnnProtocol.COMMAND)[self.bytecount == 0]
-        self.bits.pop(0)    # Remove ACK bit
+        self.bits = self.bits[-8:]    # Remove superfluous bits (ACK)
         self.bits.reverse()
         self.putp([commands[AnnProtocol.BIT], self.bits])
         self.putp([commands[cmd], self.databyte])
@@ -328,6 +328,8 @@ class Decoder(srd.Decoder):
 
     def handle_byte_wire3(self):
         """Process data byte after last CLK pulse for 3-wire bus."""
+        if not self.bits:
+            return
         # Display all bits
         self.bits[0][2] = self.samplenum    # Update end sample of the last bit
         for bit in self.bits:
